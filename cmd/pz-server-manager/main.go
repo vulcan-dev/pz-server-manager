@@ -10,7 +10,10 @@ var config server.Config
 
 func main() {
 	// Init logger
-	log.SetFormatter(&log.JSONFormatter{})
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp: true,
+		ForceColors:   true,
+	})
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.DebugLevel)
 

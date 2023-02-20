@@ -40,6 +40,14 @@ build:
 run: build
 	go run $(GO_BUILD_FLAGS) cmd/pz-server-manager/main.go
 
+test:
+	$(info Testing...)
+	@go test -v ./...
+
+bench:
+	$(info Benchmarking...)
+	@go test -bench=. ./...
+
 .PHONY: clean
 clean:
 	$(RM) bin

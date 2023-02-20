@@ -5,6 +5,8 @@ import (
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 	"github.com/vulcan-dev/pz-server-manager/cmd/pz-server-manager/internal/pz"
+	"path/filepath"
+	"strings"
 )
 
 type Config struct {
@@ -13,21 +15,29 @@ type Config struct {
 }
 
 var config Config
-var pzConfig pz.Config
+var options pz.Options
+var fs pz.Filesystem
 
-func Run(_config Config) {
+func Run(_config Config) error {
 	config = _config
 
 	log.Info("Starting HTTP server on port ", config.HTTP_PORT)
 	log.Info("PZ_ROOT is ", config.PZ_ROOT)
 
 	var err error
-	pzConfig, err = pz.Parse("servertest", config.PZ_ROOT)
+	options, err = pz.Parse("servertest", config.PZ_ROOT)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fs = *pz.NewFilesystem(config.PZ_ROOT)
+	_, err = fs.List("", false) // Load cache
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	StartHTTPServer()
+	return nil
 }
 
 func StartHTTPServer() {
@@ -44,14 +54,84 @@ func StartHTTPServer() {
 
 	// ! Important: Methods must be registered after middlewares
 
+	// General
 	engine.GET("/api/v1/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{
 			"status": "ok",
 		})
 	})
 
+	// Filesystem
+	engine.GET("/api/v1/files", func(c *gin.Context) {
+		files, err := fs.List("", false)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		c.JSON(200, gin.H{
+			"status": "ok",
+			"data":   files,
+		})
+	})
+
+	// Example: /api/v1/files/levels/level1
+	engine.GET("/api/v1/files/*path", func(c *gin.Context) {
+		path := c.Param("path")
+
+		// Check if path is a file
+		if filepath.Ext(strings.TrimSpace(path)) != "" {
+			file, err := fs.Get(path)
+			if err != nil {
+				c.JSON(404, gin.H{
+					"status": "error",
+					"error":  err.Error(),
+				})
+				return
+			}
+
+			content, err := file.Content()
+			if err != nil {
+				c.JSON(404, gin.H{
+					"status": "error",
+					"error":  err.Error(),
+				})
+				return
+			}
+
+			c.JSON(200, gin.H{
+				"status": "ok",
+				"data":   content,
+			})
+			return
+		}
+
+		files, err := fs.List(path, false)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		c.JSON(200, gin.H{
+			"status": "ok",
+			"data":   files,
+		})
+	})
+
+	// Config
 	engine.GET("/api/v1/config", func(c *gin.Context) {
-		c.JSON(200, pzConfig.ReadToGIN(c))
+		data, err := options.JSON()
+		if err != nil {
+			log.Error(err)
+			c.JSON(500, gin.H{
+				"status": "error",
+				"error":  err.Error(),
+			})
+			return
+		}
+
+		c.JSON(200, gin.H{
+			"status": "ok",
+			"data":   data,
+		})
 	})
 
 	engine.POST("/api/v1/config", func(c *gin.Context) {
@@ -66,18 +146,7 @@ func StartHTTPServer() {
 			return
 		}
 
-		err = pzConfig.SaveFromJSON("servertest", config.PZ_ROOT, data)
-		if err != nil {
-			log.Error(err)
-			c.JSON(500, gin.H{
-				"status": "error",
-				"error":  err.Error(),
-			})
-		} else {
-			c.JSON(200, gin.H{
-				"status": "ok",
-			})
-		}
+		log.Info(data)
 	})
 
 	engine.Run(":" + config.HTTP_PORT)
